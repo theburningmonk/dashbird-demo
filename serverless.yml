@@ -12,6 +12,9 @@ provider:
   tracing: true
   stackTags:
     name: dashbird-demo
+  environment:
+    TIMEOUT_PERCENTAGE: 0.1
+    ERROR_PERCENTAGE: 0.1
   iamRoleStatements:
     - Effect: Allow
       Action:
