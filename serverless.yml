@@ -1,0 +1,108 @@
+service: dashbird-demo
+
+plugins:
+  - serverless-plugin-tracing
+  - serverless-pseudo-parameters
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  stage: dev
+  tracing: true
+  stackTags:
+    name: dashbird-demo
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - xray:PutTraceSegments
+        - xray:PutTelemetryRecords
+      Resource: '*'
+    - Effect: Allow
+      Action:
+        - kinesis:PutRecord
+      Resource:
+        - Fn::GetAtt: [KinesisStream, Arn]
+    - Effect: Allow
+      Action:
+        - dynamodb:PutItem
+      Resource: 
+        - Fn::GetAtt: [PostTable, Arn]
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+      Resource: 
+        - Fn::GetAtt: [FollowersTable, Arn]
+
+functions:
+  create-post:
+    handler: functions/create-post.handler
+    environment:
+      STREAM_NAME:
+        Ref: KinesisStream
+      TABLE_NAME:
+        Ref: PostTable
+    events:
+      - http:
+          path: posts/create
+          method: post
+    
+  distribute-post:
+    handler: functions/distribute-post.handler
+    environment:      
+      GET_FOLLOWERS_URL:
+        Fn::Join:
+          - ""
+          - - "https://"
+            - Ref: "ApiGatewayRestApi"
+            - ".execute-api.#{AWS::Region}.amazonaws.com/${self:provider.stage}/followers"
+    events:
+      - stream:
+          type: kinesis
+          arn:
+            Fn::GetAtt: [KinesisStream, Arn]
+    
+  get-followers:
+    handler: functions/get-followers.handler
+    environment:
+      TABLE_NAME: 
+        Ref: FollowersTable
+    events: 
+      - http:
+          path: followers/{userId}
+          method: get
+
+resources:
+  Resources:
+    KinesisStream:
+      Type: AWS::Kinesis::Stream
+      Properties: 
+        Name: events
+        ShardCount: 1
+
+    PostTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: posts
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: postId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: postId
+            KeyType: HASH
+
+    FollowersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: followers
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: followerId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: followerId
+            KeyType: RANGE
